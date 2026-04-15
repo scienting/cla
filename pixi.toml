@@ -1,0 +1,14 @@
+[workspace]
+authors = ["Alex Maldonado <alex@scient.ing>"]
+channels = ["conda-forge"]
+name = "cla"
+platforms = ["linux-64", "osx-arm64"]
+version = "0.1.0"
+
+[tasks]
+lint = { cmd = ["ruff", "check", "--fix", "--config", ".ruff.toml", "./"] }
+format = { depends-on = ["lint"], cmd = ["ruff", "check", "--select", "I", "--fix", "&&", "ruff", "format", "--config", ".ruff.toml", "./"] }
+
+[dependencies]
+python = ">=3.14.4,<3.15"
+ruff = ">=0.15.10,<0.16"

@@ -1,0 +1,69 @@
+name: CLA Signing
+
+on:
+  workflow_call:
+    secrets:
+      CLA_BOT_PAT:
+        description: 'A Personal Access Token with repo write permissions'
+        required: true
+
+jobs:
+  process-signature:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout CLA Repository
+        uses: actions/checkout@v6
+        with:
+          repository: 'scienting/cla'
+          token: ${{ secrets.CLA_BOT_PAT }}
+          path: 'cla-repo'
+
+      - name: Install pixi
+        uses: prefix-dev/setup-pixi@v0.9.4
+        with:
+          manifest-path: cla-repo/pixi.toml
+          locked: false
+          frozen: false
+          cache: true
+          cache-write: ${{ github.event_name == 'push' && github.ref_name == 'main' }}
+          activate-environment: true
+
+      # github.event_path points to the payload from the repository that CALLED this workflow
+      - name: Run CLA Update Script
+        env:
+          GITHUB_EVENT_PATH: ${{ github.event_path }}
+        run: |
+          cd cla-repo
+          python scripts/update_cla.py
+
+      - name: Commit and Push
+        id: commit-step
+        run: |
+          cd cla-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add signatures/cla.json
+          
+          # Check if the script actually modified the JSON (ignores duplicates)
+          if ! git diff-index --quiet HEAD; then
+            git commit -m "docs(cla): add signature for @${{ github.event.comment.user.login }}"
+            git push
+            # Set an output flag so the next step knows it was a fresh signature
+            echo "signed=true" >> $GITHUB_OUTPUT
+          else
+            echo "No new changes to commit."
+            echo "signed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Leave PR Comment
+        if: steps.commit-step.outputs.signed == 'true'
+        uses: actions/github-script@v9
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `🎉 Thank you **@${context.payload.comment.user.login}** for signing the Scientific Computing Studio CLA! Your signature has been successfully recorded.\n\nTo unblock this Pull Request, you need to re-run the failed CLA check.\n\n1. Scroll down to the checks section at the bottom of this PR.\n2. Click 'View Details' next to the failing \`CLA Status Check\`.\n3. In the top right corner of the logs page, click 'Re-run failed jobs'.`
+            })

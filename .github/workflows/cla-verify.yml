@@ -1,0 +1,61 @@
+name: Verify CLA Signature
+
+on:
+  workflow_call:
+
+jobs:
+  check-signature:
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Checkout CLA Repository
+        uses: actions/checkout@v6
+        with:
+          repository: 'scienting/cla'
+          path: 'cla-repo'
+
+      - name: Check if user signed
+        id: check
+        run: |
+          USER_ID="${{ github.event.pull_request.user.id }}"
+          # Count how many times this ID appears in the signedContributors array
+          SIGNED=$(jq "[.signedContributors[] | select(.id == $USER_ID)] | length" cla-repo/signatures/cla.json)
+          
+          if [ "$SIGNED" -gt 0 ]; then
+            echo "User has signed the CLA."
+            echo "signed=true" >> $GITHUB_OUTPUT
+          else
+            echo "User has NOT signed the CLA."
+            echo "signed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Post Instructions if Not Signed
+        if: steps.check.outputs.signed == 'false'
+        uses: actions/github-script@v9
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            // Get all comments on the PR to prevent spamming the user
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            
+            // Check if our bot has already left the welcome message
+            const botComment = comments.data.find(c => c.body.includes("Welcome to the Scientific Computing Studio community"));
+            
+            if (!botComment) {
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: `👋 Welcome to the Scientific Computing Studio community, **@${context.payload.pull_request.user.login}**!\n\nBefore we can review and merge your pull request, we require a signature on our Contributor License Agreement (CLA) to ensure a clean chain of intellectual property.\n\n**Please visit our central [CLA Repository](https://github.com/scienting/cla) to read the agreement and find instructions on how to sign.**\n\nOnce your signature is recorded, you can re-run this check, and the bot will unblock your PR.`
+              });
+            }
+
+      - name: Enforce Block
+        if: steps.check.outputs.signed == 'false'
+        run: |
+          echo "Blocking merge until CLA is signed."
+          exit 1
